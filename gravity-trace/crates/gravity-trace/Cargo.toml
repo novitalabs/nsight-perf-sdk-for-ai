@@ -1,0 +1,71 @@
+[package]
+name = "gravity-trace"
+description = "gt: NVIDIA Nsight Perf SDK for AI (NvTrace) captures and live snapshots -> trace Parquet, Perfetto, Prometheus"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "gt"
+path = "src/main.rs"
+
+[dependencies]
+gravity-trace-core.workspace = true
+nvtrace-sys = { workspace = true, optional = true }
+arrow-array.workspace = true
+arrow-cast = { workspace = true, optional = true }
+arrow-flight = { workspace = true, optional = true }
+arrow-ipc = { workspace = true, optional = true }
+arrow-schema.workspace = true
+axum = { workspace = true, optional = true }
+bytes.workspace = true
+clap.workspace = true
+flate2.workspace = true
+futures.workspace = true
+hostname.workspace = true
+libc.workspace = true
+object_store.workspace = true
+parquet.workspace = true
+prost = { workspace = true, optional = true }
+rustc-hash = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+snafu.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tonic = { workspace = true, optional = true }
+url.workspace = true
+
+[features]
+default = ["cli"]
+# The offline tools: `gt dump parquet|perfetto` over a persisted trace. Any OS, no Nsight Perf SDK.
+cli = []
+# Collecting (monitoring): `gt export-daemon`, `export`, `profile`, `exporter`, `capture`, `import`, `tables`, `schema`,
+# with the persisted trace, Prometheus /metrics and the Flight SQL stream. Linux with the Nsight Perf SDK
+# (NVTRACE_SDK_DIR at build time). Not in the default build: `cargo build --release --features monitor`.
+monitor = [
+    "dep:nvtrace-sys",
+    "dep:arrow-cast",
+    "dep:arrow-flight",
+    "dep:arrow-ipc",
+    "dep:axum",
+    "dep:prost",
+    "dep:rustc-hash",
+    "dep:tonic",
+]
+# S3 (and S3-compatible) object stores for persist.dir / captures_dir / gt dump: `s3://bucket/prefix`.
+s3 = ["object_store/aws"]
+
+[dev-dependencies]
+arrow-ord.workspace = true
+arrow-select.workspace = true
+tempfile.workspace = true
+
+# The receiving end of bench/flightsql_check.sh: a Flight SQL server that writes every DoPut to Parquet.
+[[example]]
+name = "flightsql_sink"
+required-features = ["monitor"]
+
+[lints]
+workspace = true

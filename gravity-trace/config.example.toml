@@ -1,0 +1,142 @@
+# gravity-trace: configuration of `gt export-daemon` / `gt export` / `gt profile` (and the defaults of `gt dump`).
+#
+#   gt export-daemon start  [--config PATH]   # background process, logs to [daemon].log_file
+#   gt export-daemon stop | restart | status
+#   gt export-daemon run    [--config PATH]   # the same in the foreground (systemd, containers)
+#   gt export-daemon config [--config PATH]   # print the effective configuration (with the environment)
+#   gt export [DURATION]    [--config PATH]   # blocking: the daemon in this terminal; `successful` or the error
+#   gt dump parquet|perfetto <start> <end>    # a time range of [persist].dir -> one Parquet / Perfetto .json.gz
+#   gt profile -d 10m [--flightsql URL]       # collect 10 min in the foreground, then exit (streamed or persisted)
+#
+# Looked up at --config / $GT_CONFIG, else /etc/gravity-trace/config.toml, else these built-in defaults.
+# Every key is optional; unknown keys are errors. The values below are the defaults.
+#
+# Environment variables override this file: GT_<SECTION>_<KEY>, e.g. GT_PERSIST_DIR=s3://bucket/traces,
+# GT_LIMITS_MAX_CPUS=4, GT_FLIGHTSQL_PASSWORD=... (built-in defaults < this file < environment < command-line flags).
+# Lists as a,b or ["a", "b"]; tables as k=v,k2=v2 or { k = "v" }; booleans true/false, 1/0, yes/no, on/off.
+
+[daemon]
+# HTTP: GET /metrics (Prometheus nvtrace_*), POST /capture?duration=5s, POST /persist/flush. "" = no HTTP server.
+listen = "0.0.0.0:9465"
+# Pid of the running daemon; also its lock (a second daemon on the same pid file refuses to start).
+pid_file = "/run/gravity-trace/gt.pid"
+# stdout / stderr of the background process (appended, not rotated).
+log_file = "/var/log/gravity-trace/gt.log"
+# Where POST /capture writes <start>-<end>.parquet (+ .pm.parquet, .json.gz): a directory or an object store URL.
+captures_dir = "/var/lib/gravity-trace/captures"
+# How long `stop` waits for the daemon to finish its files and exit (seconds).
+stop_timeout_s = 60
+
+[collect]
+# Collection time in seconds: the daemon finishes its files and exits afterwards. 0 = until `stop`.
+duration_s = 0
+# Snapshot cadence in ms (the SDK recommends >= 5000). Activities reach /metrics and disk one snapshot later.
+snapshot_ms = 5000
+# Where the SDK keeps snapshot data blocks until they are exported: "memory" or "disk" (preallocated files in work_dir).
+storage = "memory"
+work_dir = "/var/lib/gravity-trace/live"
+# Provisioned trace data rate (MiB/s) sizing the snapshot storage (two banks of rate x interval).
+data_rate_mib = 128
+# Upper bound of per-snapshot attachment data (module / function / CUDA graph definitions of every process).
+max_attach_mib = 1024
+# Parallel export shards, each owning whole GPUs; 0 = one per GPU (at most 8), 1 = the SDK's single thread.
+shards = 0
+# Providers not to decode: "gpu_pm", "gpu_hwt", "cuda_api", "nvtx".
+ignore = []
+# Kernels per process and kind exported individually in /metrics (the rest folded into <other>).
+top = 50
+# Append one JSON line of diagnostics per snapshot to this file (off when unset).
+# diag_file = "/var/log/gravity-trace/diag.jsonl"
+# The procfs of the host's PID namespace. Process titles are read there by host pid (a process that renames itself,
+# like vLLM's VLLM::Worker_TP0 / VLLM::EngineCore, is shown under that name): /proc when gt runs in the host's PID
+# namespace (hostPID, --pid=host), else the host's /proc mounted read-only, e.g. "/host/proc". A procfs of another
+# namespace never matches (checked against the pids the service reports): processes keep their executable's name.
+host_proc = "/proc"
+
+[persist]
+# Write every activity to disk (what `gt dump` reads). false: only /metrics and on-demand captures.
+# Ignored while [flightsql] is enabled (the activities are streamed instead).
+enabled = true
+# What the files are, one or the other:
+#   "parquet":  <start>-<end>.parquet trace + <start>-<end>.pm.parquet PM samples; `gt dump` reads them.
+#   "perfetto": <start>-<end>.json.gz Perfetto / Chrome trace JSON (activities, API -> GPU arrows, PM counters) to open
+#               in https://ui.perfetto.dev. The UI holds a few million events: keep rotate_s short (5-10 s under load).
+format = "parquet"
+# Where, named by UTC nanoseconds. A directory, or an object store URL: s3://bucket/prefix (gt built with
+# `--features monitor,s3`; credentials from the AWS_* variables).
+dir = "/var/lib/gravity-trace/traces"
+# Start a new file every this many seconds (at the next snapshot boundary). `gt dump` asks the daemon to close the
+# open file when the requested range reaches into it.
+rotate_s = 60
+# Write buffer: activities queued between the snapshots and the disk writer, at most this many MiB (168 bytes each:
+# 1024 MiB = 6.4 M activities). It must hold one snapshot (rate x snapshot interval); beyond it chunks are dropped and
+# counted (nvtrace_persist_dropped_rows_total) instead of slowing the snapshots.
+max_buffer_mib = 1024
+# Rows per Parquet row group; each group is sorted (pid, GPU, stream, start) in memory before it is written (parquet).
+row_group_rows = 1048576
+# zstd level of the Parquet pages (1-22; parquet).
+zstd_level = 3
+# gzip level of the .json.gz files (1-9; perfetto). They are compressed on one thread while the trace is collected, so
+# the level must keep up with the trace: on one CPU core of a node level 1 compresses ~660 MB/s of JSON, level 2 ~480, level 3
+# ~330 (half the size of level 1); DeepSeek-V4 TP 4 under load makes ~400 MB/s. (`gt dump perfetto` and captures use
+# level 6.)
+gzip_level = 1
+# Delete the oldest files while dir holds more than this many GiB. 0 = never delete.
+max_disk_gib = 64
+# Also write PM metric samples (parquet: .pm.parquet files; perfetto: counter tracks in the same file).
+pm = true
+
+[flightsql]
+# Stream every activity (and PM sample) to an Arrow Flight SQL server while collecting: bulk ingestion
+# (CommandStatementIngest in a DoPut), one DoPut per snapshot. On: nothing is written to disk ([persist] is ignored).
+# `gt profile --flightsql URL` turns this on for one run.
+enabled = false
+# grpc://host:port or grpc+tls://host:port (also http://, https://).
+endpoint = ""
+# Target tables: activities (the trace Parquet columns with `host` in front) and PM samples ("" = not sent).
+table = "gt_trace"
+pm_table = "gt_pm"
+# "" = the server's default.
+catalog = ""
+db_schema = ""
+# Let the server create missing tables (false: ingesting into a missing table fails). Rows are always appended.
+create = true
+# Flight handshake (basic auth; the server answers with a bearer token), or a bearer token.
+# $GT_FLIGHTSQL_PASSWORD / $GT_FLIGHTSQL_TOKEN keep the secrets out of this file.
+username = ""
+password = ""
+token = ""
+# PEM CA certificate for grpc+tls ("" = the built-in web PKI roots).
+tls_ca_file = ""
+# Rows per Arrow record batch; at most this many activities per DoPut.
+batch_rows = 65536
+put_rows = 1048576
+# Send buffer: activities queued for the sender, at most this many MiB (168 bytes each; it must hold one snapshot).
+# Beyond it chunks are dropped and counted (nvtrace_flight_dropped_rows_total) instead of slowing the snapshots.
+max_buffer_mib = 1024
+# Cap of the sending rate in MiB/s (spreads each snapshot's burst); 0 = as fast as the network takes it.
+max_send_mib_s = 0
+# Send dictionary-encoded columns (kind, name, ...) as Arrow dictionaries: much smaller, the server must accept them.
+# false = plain strings (any server).
+dictionaries = false
+# Arrow IPC body compression: "none", "zstd", "lz4" (the server must support it).
+compression = "none"
+# Per-request timeout in seconds. A failed DoPut is retried this many times on a new connection, then its rows are
+# dropped and counted. A retry after a failure the server did not report may ingest rows twice.
+timeout_s = 60
+retries = 3
+# gRPC headers on every call, e.g. { database = "traces" }.
+headers = {}
+# Server-specific ingestion options (CommandStatementIngest.options).
+options = {}
+# Constant columns in front of every row besides `host` (this host's name unless set here), e.g. { cluster = "gpu-cluster-1" }.
+columns = {}
+
+[limits]
+# At most this many CPU cores for the whole process (CPU affinity of every thread: the last N CPUs of cpu_list,
+# or of the CPUs the process may use). 0 = no limit.
+max_cpus = 0
+# CPUs to run on, e.g. "64-71" or "0,2,4-7". "" = every CPU the process may use.
+cpu_list = ""
+# Scheduling priority (nice, -20..19; below 0 needs CAP_SYS_NICE).
+nice = 0

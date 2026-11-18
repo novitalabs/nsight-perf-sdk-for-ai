@@ -1,0 +1,18 @@
+[package]
+name = "nvtrace-sys"
+description = "Bindings to the NVIDIA Nsight Perf SDK for AI (NvTrace) table exporter: TSF import and live snapshots"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+links = "nvtrace_shim"
+build = "build.rs"
+
+[dependencies]
+snafu.workspace = true
+
+[build-dependencies]
+cc = "1.2"
+
+[lints]
+workspace = true

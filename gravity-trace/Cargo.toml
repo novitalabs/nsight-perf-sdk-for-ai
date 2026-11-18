@@ -1,0 +1,62 @@
+[workspace]
+resolver = "3"
+members = ["crates/nvtrace-sys", "crates/gravity-trace-core", "crates/gravity-trace"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+gravity-trace-core = { path = "crates/gravity-trace-core" }
+nvtrace-sys = { path = "crates/nvtrace-sys" }
+
+arrow-array = "60.1"
+# Flight SQL client (gt profile --flightsql, [flightsql]): bulk ingestion over gRPC, TLS with the web PKI roots.
+arrow-flight = { version = "60.1", features = ["flight-sql", "tls-ring", "tls-webpki-roots"] }
+arrow-ipc = { version = "60.1", features = ["zstd", "lz4"] }
+arrow-cast = "60.1"
+arrow-ord = "60.1"
+arrow-schema = "60.1"
+arrow-select = "60.1"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "tokio", "json", "query"] }
+clap = { version = "4.6", features = ["derive", "env"] }
+bytes = "1"
+cpp_demangle = "0.5.1"
+flate2 = "1.1"
+futures = { version = "0.3", default-features = false, features = ["std"] }
+hostname = "0.4.2"
+libc = "0.2"
+# Every file gt writes and reads back goes through object_store: a local directory today, `s3://...` once the
+# `aws` feature is enabled.
+object_store = { version = "0.14.1", default-features = false, features = ["fs", "tokio"] }
+prost = { version = "0.14.1", default-features = false }
+parquet = { version = "60.1", default-features = false, features = ["arrow", "zstd", "async"] }
+rustc-hash = "2.1"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+snafu = { version = "0.9.2", features = ["rust_1_81"] }
+tempfile = "3"
+tokio = { version = "1.54", features = ["rt-multi-thread", "net", "time", "sync", "io-util", "macros", "signal", "fs"] }
+toml = "0.8"
+tonic = { version = "0.14.1", default-features = false, features = ["transport", "codegen"] }
+url = "2"
+
+# No `unwrap()` anywhere: errors go through snafu, invariants use `expect("why")`.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+# Line tables stay in the binary: a panic prints its stack backtrace with file:line (crash.rs).
+debug = "line-tables-only"
+# The SDK calls back into Rust (nvtrace-sys sinks) from its own threads: every callback uses catch_unwind and turns a
+# panic into an error, so keep unwinding (panic=abort would kill the exporter instead). Pipeline threads that panic
+# are joined and reported as errors; the panic hook prints the stack.
+panic = "unwind"
+
+[profile.dev]
+panic = "unwind"

@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 612" width="900" height="612" role="img" aria-label="gravity-trace architecture: libcuda and the GPU hardware trace feed the out-of-process nvidia-nsight-perf service; one gt pipeline takes snapshots with the data blocks in memory, exports them per GPU, merges them, and both serves Prometheus metrics and writes captures to Parquet">
+<title>gravity-trace architecture: libcuda and the GPU hardware trace feed the out-of-process nvidia-nsight-perf service; one gt pipeline takes snapshots with the data blocks in memory, exports them per GPU, merges them, and both serves Prometheus metrics and writes captures to Parquet</title>
+<style>
+svg{--fg:#1f2328;--muted:#59636e;--acc:#0969da;--gt:#1a7f37;--fill:#ffffff}
+@media (prefers-color-scheme: dark){svg{--fg:#e6edf3;--muted:#9198a1;--acc:#4493f8;--gt:#3fb950;--fill:#0d1117}}
+text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;font-size:12px;fill:var(--fg)}
+.sub{font-size:10px;fill:var(--muted)}
+.lbl{font-size:10px;fill:var(--muted)}
+.title{font-size:14px;font-weight:600}
+.group{font-weight:600}
+.box{fill:var(--fill);stroke:var(--fg);stroke-width:1.2}
+.proc{fill:none;stroke:var(--fg);stroke-width:2.4}
+.acc{stroke:var(--acc);stroke-width:2}
+.gt{stroke:var(--gt);stroke-width:2}
+.wrap-acc{fill:none;stroke:var(--acc);stroke-width:1.6;stroke-dasharray:6 4}
+.wrap-gt{fill:none;stroke:var(--gt);stroke-width:1.6;stroke-dasharray:6 4}
+.legacy{stroke-dasharray:4 3}
+.ln{fill:none;stroke:var(--fg);stroke-width:1.2}
+.ah{fill:var(--fg)}
+</style>
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>
+<text x="10" y="22" class="title">gravity-trace (gt)</text>
+<rect x="10" y="36" width="330" height="92" rx="8" class="proc"/>
+<text x="24" y="56" class="lbl">CUDA application process (no injection)</text>
+<rect x="24" y="70" width="120" height="42" rx="5" class="box "/>
+<text x="84" y="95" text-anchor="middle">torch / Python</text>
+<rect x="164" y="70" width="162" height="42" rx="5" class="box "/>
+<text x="245" y="87" text-anchor="middle">libcuda (≥ R615)</text>
+<text x="245" y="101" text-anchor="middle" class="sub">built-in CUDA API trace</text>
+<polyline points="144,91 162,91" class="ln" marker-end="url(#ah)"/>
+<rect x="380" y="70" width="150" height="42" rx="5" class="box "/>
+<text x="455" y="87" text-anchor="middle">shared-memory rings</text>
+<text x="455" y="101" text-anchor="middle" class="sub">API records</text>
+<polyline points="326,91 378,91" class="ln" marker-end="url(#ah)"/>
+<rect x="570" y="70" width="320" height="42" rx="5" class="box "/>
+<text x="730" y="87" text-anchor="middle">GPU</text>
+<text x="730" y="101" text-anchor="middle" class="sub">hardware trace · GR context · PM counters</text>
+<rect x="380" y="156" width="510" height="48" rx="8" class="box "/>
+<text x="635" y="176" text-anchor="middle">nvidia-nsight-perf (SDK service, out of process)</text>
+<text x="635" y="190" text-anchor="middle" class="sub">root + host PID namespace · one per node · keeps a rolling history</text>
+<polyline points="455,112 455,154" class="ln" marker-end="url(#ah)"/>
+<polyline points="730,112 730,154" class="ln" marker-end="url(#ah)"/>
+<rect x="10" y="232" width="880" height="300" rx="8" class="wrap-gt"/>
+<text x="22" y="250" class="group">gt exporter · gt capture — one live pipeline, no TSF on disk</text>
+<polyline points="650,204 650,262" class="ln" marker-end="url(#ah)"/>
+<text x="658" y="222" class="lbl">snapshot every 5 s</text>
+<rect x="230" y="264" width="440" height="44" rx="5" class="box gt"/>
+<text x="450" y="282" text-anchor="middle">ContinuousSnapshotExporter (SDK, via nvtrace-sys)</text>
+<text x="450" y="296" text-anchor="middle" class="sub">two history banks · data blocks in anonymous memory (patched), freed after export</text>
+<rect x="230" y="328" width="440" height="44" rx="5" class="box gt"/>
+<text x="450" y="346" text-anchor="middle">export shards, one thread per GPU</text>
+<text x="450" y="360" text-anchor="middle" class="sub">data model build · TableExporter · mapper: rows → activities</text>
+<rect x="230" y="392" width="440" height="44" rx="5" class="box gt"/>
+<text x="450" y="410" text-anchor="middle">merge thread</text>
+<text x="450" y="424" text-anchor="middle" class="sub">every snapshot's activities, in order</text>
+<polyline points="450,308 450,326" class="ln" marker-end="url(#ah)"/>
+<polyline points="450,372 450,390" class="ln" marker-end="url(#ah)"/>
+<rect x="24" y="470" width="410" height="46" rx="5" class="box gt"/>
+<text x="229" y="489" text-anchor="middle">/metrics → Prometheus → Grafana</text>
+<text x="229" y="503" text-anchor="middle" class="sub">per-kernel aggregator · nvtrace_* series</text>
+<rect x="466" y="470" width="410" height="46" rx="5" class="box gt"/>
+<text x="671" y="489" text-anchor="middle">capture: gt capture -d 5s · POST /capture?duration=5s</text>
+<text x="671" y="503" text-anchor="middle" class="sub">activities that start in the window → writer thread</text>
+<polyline points="340,436 340,452 229,452 229,468" class="ln" marker-end="url(#ah)"/>
+<polyline points="560,436 560,452 671,452 671,468" class="ln" marker-end="url(#ah)"/>
+<text x="229" y="464" class="lbl" text-anchor="end">always</text>
+<text x="679" y="464" class="lbl">while a capture is open</text>
+<rect x="466" y="556" width="410" height="44" rx="5" class="box "/>
+<text x="671" y="574" text-anchor="middle">trace Parquet · PM Parquet · Perfetto JSON</text>
+<text x="671" y="588" text-anchor="middle" class="sub">named by their UTC time range</text>
+<polyline points="671,516 671,554" class="ln" marker-end="url(#ah)"/>
+<rect x="24" y="556" width="410" height="44" rx="5" class="box legacy"/>
+<text x="229" y="574" text-anchor="middle">gt import · gt tables</text>
+<text x="229" y="588" text-anchor="middle" class="sub">for TSF directories that already exist (SDK streaming consumer)</text>
+<polyline points="434,578 464,578" class="ln" marker-end="url(#ah)"/>
+</svg>
